@@ -1,15 +1,17 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
+from streamlit_gsheets import GSheetsConnection
 
 # Optimization for Samsung A10s
 st.set_page_config(page_title="Biashara App", layout="centered")
 
-# Initialize Data
-if 'db' not in st.session_state:
-    st.session_state.db = pd.DataFrame(columns=['Date', 'Model', 'Item', 'Category', 'Price'])
+# --- NEW: CLOUD CONNECTION ---
+# This pulls data from Google Sheets so it doesn't disappear on refresh
+conn = st.connection("gsheets", type=GSheetsConnection)
+df_cloud = conn.read(ttl="0s") # ttl=0 means always get newest data
 
-st.title("📈 Biashara App")
+st.title("📈 Biashara App (Cloud Sync)")
 st.write("Technician & Spares Tracker")
 
 # --- RECORDING SECTION ---
@@ -22,15 +24,23 @@ with st.container():
     
     if st.button("HIFADHI (SAVE)", use_container_width=True):
         if itm and prc > 0:
+            # 1. Create the new row
             new_entry = pd.DataFrame([{
-                'Date': pd.to_datetime(datetime.now().date()),
+                'Date': datetime.now().strftime("%Y-%m-%d"),
                 'Model': mod if mod else "N/A",
                 'Item': itm,
                 'Category': cat,
                 'Price': prc
             }])
-            st.session_state.db = pd.concat([st.session_state.db, new_entry], ignore_index=True)
-            st.success(f"Imerekodiwa: {itm}")
+            
+            # 2. Merge with existing cloud data
+            updated_df = pd.concat([df_cloud, new_entry], ignore_index=True)
+            
+            # 3. PUSH TO CLOUD (Google Sheets)
+            conn.update(data=updated_df)
+            
+            st.success(f"Imerekodiwa Cloud: {itm}")
+            st.rerun() # Refresh to show new ranking
         else:
             st.error("Tafadhali jaza jina na bei.")
 
@@ -39,8 +49,11 @@ st.divider()
 # --- REPORTS & RANKING ---
 st.subheader("📊 Ripoti na Ranking")
 
-if not st.session_state.db.empty:
-    # DATE RANGE SELECTOR
+# Use df_cloud for reporting so it's always permanent
+if not df_cloud.empty:
+    # Ensure Date column is in correct format
+    df_cloud['Date'] = pd.to_datetime(df_cloud['Date'])
+    
     st.write("Chagua Tarehe za Ripoti:")
     c1, c2 = st.columns(2)
     with c1:
@@ -49,29 +62,20 @@ if not st.session_state.db.empty:
         end = st.date_input("Mpaka", datetime.now())
 
     # Filter Logic
-    mask = (st.session_state.db['Date'].dt.date >= start) & (st.session_state.db['Date'].dt.date <= end)
-    filtered = st.session_state.db.loc[mask]
+    mask = (df_cloud['Date'].dt.date >= start) & (df_cloud['Date'].dt.date <= end)
+    filtered = df_cloud.loc[mask]
 
     if not filtered.empty:
-        # RANKING BY VOLUME
         st.write("🏆 **Vitu vinavyoongoza (Ranking)**")
-        # Combine Item and Model for specific rank
         rank_df = filtered.groupby(['Item', 'Model']).size().reset_index(name='Quantity').sort_values('Quantity', ascending=False)
         st.table(rank_df)
 
-        # TOTAL REVENUE
         st.metric("Jumla ya Pesa", f"{filtered['Price'].sum():,.0f} TSh")
     
-    # DATA SAFETY
     st.divider()
-    csv = st.session_state.db.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Download Backup (Save to Phone)", csv, "biashara_backup.csv", "text/csv", use_container_width=True)
+    # Backup still available for extra safety
+    csv = df_cloud.to_csv(index=False).encode('utf-8')
+    st.download_button("📥 Download Backup", csv, "biashara_backup.csv", "text/csv", use_container_width=True)
 
-    # UPLOAD OLD DATA
-    uploaded = st.file_uploader("📤 Rudisha Data (Upload Backup)")
-    if uploaded:
-        st.session_state.db = pd.read_csv(uploaded)
-        st.session_state.db['Date'] = pd.to_datetime(st.session_state.db['Date'])
-        st.rerun()
 else:
-    st.info("Bado hujarekodi kitu kwa leo.")
+    st.info("Bado hujarekodi kitu. Data itatokea hapa ukishaanza kuandika.")
