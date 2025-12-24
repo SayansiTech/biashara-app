@@ -1,67 +1,102 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 
-# Setup for Samsung A10s
-st.set_page_config(page_title="Biashara App", layout="centered")
+# Optimization for Samsung A10s
+st.set_page_config(page_title="Biashara App Pro", layout="centered")
 
-# 1. Start the Data Storage
+# --- DATA INITIALIZATION ---
 if 'db' not in st.session_state:
     st.session_state.db = pd.DataFrame(columns=['Date', 'Model', 'Item', 'Category', 'Price'])
 
-st.title("📈 Biashara App")
+st.title("📈 Biashara App Pro")
 
-# 2. Input Section
-with st.container():
-    st.subheader("Ingiza Mauzo")
+# --- 1. RECORDING SECTION ---
+with st.expander("➕ Ingiza Mauzo Mapya", expanded=True):
     cat = st.radio("Aina", ["Job/Service", "Spare/Good"], horizontal=True)
-    mod = st.text_input("Phone Model").upper()
-    itm = st.text_input("Item/Service Name").title()
+    mod = st.text_input("Phone Model").upper().strip()
+    itm = st.text_input("Item/Service Name").title().strip()
     prc = st.number_input("Price (TSh)", min_value=0, step=500)
-
+    
     if st.button("HIFADHI (SAVE)", use_container_width=True):
         if itm and prc > 0:
-            new_row = pd.DataFrame([{
+            new_entry = pd.DataFrame([{
                 'Date': datetime.now().strftime("%Y-%m-%d"),
                 'Model': mod if mod else "N/A",
                 'Item': itm,
                 'Category': cat,
                 'Price': prc
             }])
-            st.session_state.db = pd.concat([st.session_state.db, new_row], ignore_index=True)
+            # Add to current session
+            st.session_state.db = pd.concat([st.session_state.db, new_entry], ignore_index=True)
             st.success(f"Imerekodiwa: {itm}")
         else:
             st.error("Jaza jina na bei!")
 
 st.divider()
 
-# 3. The "Anti-Disappear" Section (Data Safety)
-st.subheader("💾 Sehemu ya Usalama (Save/Load)")
-col1, col2 = st.columns(2)
+# --- 2. DATA SAFETY (BACKUP & RESTORE) ---
+# Move this up so you can Restore BEFORE checking reports
+st.subheader("💾 Data Safety & Restore")
+uploaded = st.file_uploader("UPLOAD LATEST BACKUP", type="csv")
+if uploaded:
+    uploaded_df = pd.read_csv(uploaded)
+    # SMART MERGE: Combine uploaded data with current session, removing duplicates
+    combined = pd.concat([st.session_state.db, uploaded_df]).drop_duplicates().reset_index(drop=True)
+    st.session_state.db = combined
+    st.success("✅ Data imerudishwa na kuunganishwa!")
 
-with col1:
-    # This saves your data to your Samsung's 'Downloads' folder
-    csv = st.session_state.db.to_csv(index=False).encode('utf-8')
-    st.download_button("DOWNLOAD BACKUP", csv, "mauzo_yangu.csv", "text/csv", use_container_width=True)
+# --- 3. REPORTS & FILTERING ---
+st.subheader("📊 Ripoti na Ranking")
 
-with col2:
-    # This brings your data back if the phone refreshes
-    uploaded_file = st.file_uploader("RESTORE DATA", type="csv")
-    if uploaded_file:
-        st.session_state.db = pd.read_csv(uploaded_file)
-        st.success("Data imerudi!")
+if not st.session_state.db.empty:
+    df = st.session_state.db.copy()
+    df['Date'] = pd.to_datetime(df['Date'])
+    
+    # --- DATE SELECTION ---
+    report_type = st.selectbox("Aina ya Ripoti", ["Custom Range", "Today", "This Month", "This Year"])
+    
+    today = datetime.now().date()
+    if report_type == "Today":
+        start_date, end_date = today, today
+    elif report_type == "This Month":
+        start_date = today.replace(day=1)
+        end_date = today
+    elif report_type == "This Year":
+        start_date = today.replace(month=1, day=1)
+        end_date = today
+    else:
+        c1, c2 = st.columns(2)
+        start_date = c1.date_input("Kuanzia", today - timedelta(days=7))
+        end_date = c2.date_input("Mpaka", today)
+
+    # Filter Logic
+    mask = (df['Date'].dt.date >= start_date) & (df['Date'].dt.date <= end_date)
+    filtered_df = df.loc[mask]
+
+    if not filtered_df.empty:
+        st.metric(f"Mapato ({report_type})", f"{filtered_df['Price'].sum():,.0f} TSh")
+
+        # --- RANKING (Both Spares & Services) ---
+        st.write("🏆 **Top Performers**")
+        # Combine everything for a full ranking
+        full_rank = filtered_df.groupby(['Category', 'Item', 'Model']).size().reset_index(name='Qty')
+        full_rank = full_rank.sort_values(['Category', 'Qty'], ascending=[True, False])
+        st.dataframe(full_rank, use_container_width=True)
+
+        # --- DOWNLOAD SPECIFIC REPORT ---
+        report_csv = filtered_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label=f"Download {report_type} CSV",
+            data=report_csv,
+            file_name=f"biashara_{report_type}_{today}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    else:
+        st.warning("Hakuna data kwenye tarehe hizi.")
 
 st.divider()
-
-# 4. Reports
-if not st.session_state.db.empty:
-    st.subheader("🏆 Ranking")
-    df = st.session_state.db
-    # Show Top 5
-    rank = df.groupby(['Item', 'Model']).size().reset_index(name='Qty').sort_values('Qty', ascending=False)
-    st.table(rank.head(5))
-    
-    total = pd.to_numeric(df['Price']).sum()
-    st.metric("JUMLA KUU", f"{total:,.0f} TSh")
-else:
-    st.info("Andika mauzo yako ya kwanza hapo juu.")
+# Final Master Backup
+master_csv = st.session_state.db.to_csv(index=False).encode('utf-8')
+st.download_button("📥 DOWNLOAD MASTER BACKUP (Save Everything)", master_csv, "MASTER_BIASHARA.csv", "text/csv", use_container_width=True)
