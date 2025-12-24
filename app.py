@@ -2,37 +2,65 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 
-# 1. Page Configuration & Theme
-st.set_page_config(page_title="Biashara App Pro", layout="centered")
+# 1. Page Configuration
+st.set_page_config(page_title="Biashara Pro", layout="centered")
 
-# Custom CSS for a professional look
+# --- CUSTOM THEME (Fixed) ---
 st.markdown("""
     <style>
-    .main { background-color: #f5f7f9; }
-    .stButton>button { width: 100%; border-radius: 10px; height: 3em; background-color: #007bff; color: white; }
-    .stDownloadButton>button { width: 100%; border-radius: 10px; background-color: #28a745; color: white; }
+    /* Main Background */
+    .stApp { background-color: #F0F2F6; }
+    
+    /* Buttons */
+    .stButton>button {
+        width: 100%;
+        border-radius: 8px;
+        height: 3.5em;
+        background-color: #004AAD;
+        color: white;
+        font-weight: bold;
+        border: none;
+    }
+    
+    /* Metrics Styling */
+    [data-testid="stMetricValue"] {
+        color: #004AAD;
+        font-size: 24px;
+    }
+    
+    /* Input Boxes */
+    .stTextInput>div>div>input {
+        background-color: white;
+        border-radius: 5px;
+    }
     </style>
-    """, unsafe_index=True)
+    """, unsafe_allow_html=True)
 
 # Initialize Data
 if 'db' not in st.session_state:
     st.session_state.db = pd.DataFrame(columns=['Date', 'Model', 'Item', 'Category', 'Price'])
 
-# --- SIDEBAR NAVIGATION ---
-st.sidebar.title("⚙️ Management")
-page = st.sidebar.radio("Go to:", ["Daily Entry", "Reports & Analytics", "Data Safety"])
+# --- SIDEBAR ---
+st.sidebar.header("🛠️ Shop Menu")
+page = st.sidebar.selectbox("Choose Action:", ["New Sale/Job", "View Reports", "Settings & Backup"])
 
-# --- PAGE 1: DAILY ENTRY ---
-if page == "Daily Entry":
-    st.title("📱 New Transaction")
+# --- PAGE 1: ENTRY ---
+if page == "New Sale/Job":
+    st.title("🛒 Daily Recording")
+    
+    # Quick Summary for Today
+    if not st.session_state.db.empty:
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        today_total = st.session_state.db[st.session_state.db['Date'] == today_str]['Price'].astype(float).sum()
+        st.metric("Today's Total Cash", f"{today_total:,.0f} TSh")
     
     with st.container():
-        cat = st.radio("Category", ["Job/Service", "Spare/Good"], horizontal=True)
+        cat = st.radio("Aina (Type)", ["Job/Service", "Spare/Good"], horizontal=True)
         mod = st.text_input("Phone Model").upper().strip()
         itm = st.text_input("Item/Service Name").title().strip()
         prc = st.number_input("Price (TSh)", min_value=0, step=500)
         
-        if st.button("HIFADHI (SAVE)"):
+        if st.button("HIFADHI (SAVE TRANSACTION)"):
             if itm and prc > 0:
                 new_entry = pd.DataFrame([{
                     'Date': datetime.now().strftime("%Y-%m-%d"),
@@ -42,60 +70,58 @@ if page == "Daily Entry":
                     'Price': prc
                 }])
                 st.session_state.db = pd.concat([st.session_state.db, new_entry], ignore_index=True)
-                st.success(f"✅ Saved: {itm}")
+                st.success(f"✅ Recorded: {itm}")
+                st.rerun()
             else:
                 st.error("Please fill Name and Price!")
 
     st.divider()
-    if st.button("🗑️ Delete Last Entry"):
+    if st.button("🗑️ Delete Last Mistake"):
         if not st.session_state.db.empty:
             st.session_state.db = st.session_state.db[:-1]
-            st.warning("Last entry removed.")
+            st.warning("Last entry deleted.")
             st.rerun()
 
-# --- PAGE 2: REPORTS & ANALYTICS ---
-elif page == "Reports & Analytics":
-    st.title("📊 Business Reports")
+# --- PAGE 2: REPORTS ---
+elif page == "View Reports":
+    st.title("📊 Business Analysis")
     
     if not st.session_state.db.empty:
         df = st.session_state.db.copy()
         df['Date'] = pd.to_datetime(df['Date'])
         
-        # Report Filters
-        period = st.selectbox("Select Period", ["Today", "This Month", "This Year", "Custom Range"])
+        report_type = st.radio("Show for:", ["Today", "This Month", "All Time"], horizontal=True)
         today = datetime.now().date()
         
-        if period == "Today":
-            start, end = today, today
-        elif period == "This Month":
-            start, end = today.replace(day=1), today
+        if report_type == "Today":
+            filtered = df[df['Date'].dt.date == today]
+        elif report_type == "This Month":
+            filtered = df[df['Date'].dt.month == today.month]
         else:
-            start, end = today.replace(month=1, day=1), today
+            filtered = df
 
-        mask = (df['Date'].dt.date >= start) & (df['Date'].dt.date <= end)
-        filtered = df.loc[mask]
-
-        st.metric("Total Revenue", f"{filtered['Price'].sum():,.0f} TSh")
+        st.metric(f"Revenue ({report_type})", f"{filtered['Price'].astype(float).sum():,.0f} TSh")
         
-        # Ranking Table
-        st.subheader("🏆 Top Performers")
-        rank = filtered.groupby(['Category', 'Item', 'Model']).size().reset_index(name='Qty')
-        st.dataframe(rank.sort_values('Qty', ascending=False), use_container_width=True)
+        st.subheader("🏆 Ranking")
+        # Combine items to see what brings most money/frequency
+        rank = filtered.groupby(['Item', 'Model']).size().reset_index(name='Quantity')
+        st.table(rank.sort_values('Quantity', ascending=False).head(10))
     else:
-        st.info("No data available. Please upload a backup or enter new sales.")
+        st.info("No data yet. Go to 'New Sale' to start.")
 
-# --- PAGE 3: DATA SAFETY ---
-elif page == "Data Safety":
-    st.title("💾 Backup & Restore")
+# --- PAGE 3: BACKUP ---
+elif page == "Settings & Backup":
+    st.title("💾 Data Security")
     
-    st.subheader("1. Restore Data")
-    uploaded = st.file_uploader("Upload your MASTER_BIASHARA.csv", type="csv")
+    st.subheader("1. Restore Records")
+    uploaded = st.file_uploader("Upload your backup CSV", type="csv")
     if uploaded:
         uploaded_df = pd.read_csv(uploaded)
+        # Combine and remove duplicates
         st.session_state.db = pd.concat([st.session_state.db, uploaded_df]).drop_duplicates().reset_index(drop=True)
-        st.success("✅ Data Restored and Merged!")
+        st.success("✅ Records Synced Successfully!")
 
     st.divider()
-    st.subheader("2. Save Data")
-    master_csv = st.session_state.db.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 DOWNLOAD MASTER BACKUP", master_csv, "MASTER_BIASHARA.csv", "text/csv")
+    st.subheader("2. Download Backup")
+    csv_data = st.session_state.db.to_csv(index=False).encode('utf-8')
+    st.download_button("📥 DOWNLOAD MASTER FILE", csv_data, "BIASHARA_MASTER.csv", "text/csv")
