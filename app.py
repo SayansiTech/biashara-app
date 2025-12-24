@@ -2,101 +2,100 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 
-# Optimization for Samsung A10s
+# 1. Page Configuration & Theme
 st.set_page_config(page_title="Biashara App Pro", layout="centered")
 
-# --- DATA INITIALIZATION ---
+# Custom CSS for a professional look
+st.markdown("""
+    <style>
+    .main { background-color: #f5f7f9; }
+    .stButton>button { width: 100%; border-radius: 10px; height: 3em; background-color: #007bff; color: white; }
+    .stDownloadButton>button { width: 100%; border-radius: 10px; background-color: #28a745; color: white; }
+    </style>
+    """, unsafe_index=True)
+
+# Initialize Data
 if 'db' not in st.session_state:
     st.session_state.db = pd.DataFrame(columns=['Date', 'Model', 'Item', 'Category', 'Price'])
 
-st.title("📈 Biashara App Pro")
+# --- SIDEBAR NAVIGATION ---
+st.sidebar.title("⚙️ Management")
+page = st.sidebar.radio("Go to:", ["Daily Entry", "Reports & Analytics", "Data Safety"])
 
-# --- 1. RECORDING SECTION ---
-with st.expander("➕ Ingiza Mauzo Mapya", expanded=True):
-    cat = st.radio("Aina", ["Job/Service", "Spare/Good"], horizontal=True)
-    mod = st.text_input("Phone Model").upper().strip()
-    itm = st.text_input("Item/Service Name").title().strip()
-    prc = st.number_input("Price (TSh)", min_value=0, step=500)
+# --- PAGE 1: DAILY ENTRY ---
+if page == "Daily Entry":
+    st.title("📱 New Transaction")
     
-    if st.button("HIFADHI (SAVE)", use_container_width=True):
-        if itm and prc > 0:
-            new_entry = pd.DataFrame([{
-                'Date': datetime.now().strftime("%Y-%m-%d"),
-                'Model': mod if mod else "N/A",
-                'Item': itm,
-                'Category': cat,
-                'Price': prc
-            }])
-            # Add to current session
-            st.session_state.db = pd.concat([st.session_state.db, new_entry], ignore_index=True)
-            st.success(f"Imerekodiwa: {itm}")
+    with st.container():
+        cat = st.radio("Category", ["Job/Service", "Spare/Good"], horizontal=True)
+        mod = st.text_input("Phone Model").upper().strip()
+        itm = st.text_input("Item/Service Name").title().strip()
+        prc = st.number_input("Price (TSh)", min_value=0, step=500)
+        
+        if st.button("HIFADHI (SAVE)"):
+            if itm and prc > 0:
+                new_entry = pd.DataFrame([{
+                    'Date': datetime.now().strftime("%Y-%m-%d"),
+                    'Model': mod if mod else "N/A",
+                    'Item': itm,
+                    'Category': cat,
+                    'Price': prc
+                }])
+                st.session_state.db = pd.concat([st.session_state.db, new_entry], ignore_index=True)
+                st.success(f"✅ Saved: {itm}")
+            else:
+                st.error("Please fill Name and Price!")
+
+    st.divider()
+    if st.button("🗑️ Delete Last Entry"):
+        if not st.session_state.db.empty:
+            st.session_state.db = st.session_state.db[:-1]
+            st.warning("Last entry removed.")
+            st.rerun()
+
+# --- PAGE 2: REPORTS & ANALYTICS ---
+elif page == "Reports & Analytics":
+    st.title("📊 Business Reports")
+    
+    if not st.session_state.db.empty:
+        df = st.session_state.db.copy()
+        df['Date'] = pd.to_datetime(df['Date'])
+        
+        # Report Filters
+        period = st.selectbox("Select Period", ["Today", "This Month", "This Year", "Custom Range"])
+        today = datetime.now().date()
+        
+        if period == "Today":
+            start, end = today, today
+        elif period == "This Month":
+            start, end = today.replace(day=1), today
         else:
-            st.error("Jaza jina na bei!")
+            start, end = today.replace(month=1, day=1), today
 
-st.divider()
+        mask = (df['Date'].dt.date >= start) & (df['Date'].dt.date <= end)
+        filtered = df.loc[mask]
 
-# --- 2. DATA SAFETY (BACKUP & RESTORE) ---
-# Move this up so you can Restore BEFORE checking reports
-st.subheader("💾 Data Safety & Restore")
-uploaded = st.file_uploader("UPLOAD LATEST BACKUP", type="csv")
-if uploaded:
-    uploaded_df = pd.read_csv(uploaded)
-    # SMART MERGE: Combine uploaded data with current session, removing duplicates
-    combined = pd.concat([st.session_state.db, uploaded_df]).drop_duplicates().reset_index(drop=True)
-    st.session_state.db = combined
-    st.success("✅ Data imerudishwa na kuunganishwa!")
-
-# --- 3. REPORTS & FILTERING ---
-st.subheader("📊 Ripoti na Ranking")
-
-if not st.session_state.db.empty:
-    df = st.session_state.db.copy()
-    df['Date'] = pd.to_datetime(df['Date'])
-    
-    # --- DATE SELECTION ---
-    report_type = st.selectbox("Aina ya Ripoti", ["Custom Range", "Today", "This Month", "This Year"])
-    
-    today = datetime.now().date()
-    if report_type == "Today":
-        start_date, end_date = today, today
-    elif report_type == "This Month":
-        start_date = today.replace(day=1)
-        end_date = today
-    elif report_type == "This Year":
-        start_date = today.replace(month=1, day=1)
-        end_date = today
+        st.metric("Total Revenue", f"{filtered['Price'].sum():,.0f} TSh")
+        
+        # Ranking Table
+        st.subheader("🏆 Top Performers")
+        rank = filtered.groupby(['Category', 'Item', 'Model']).size().reset_index(name='Qty')
+        st.dataframe(rank.sort_values('Qty', ascending=False), use_container_width=True)
     else:
-        c1, c2 = st.columns(2)
-        start_date = c1.date_input("Kuanzia", today - timedelta(days=7))
-        end_date = c2.date_input("Mpaka", today)
+        st.info("No data available. Please upload a backup or enter new sales.")
 
-    # Filter Logic
-    mask = (df['Date'].dt.date >= start_date) & (df['Date'].dt.date <= end_date)
-    filtered_df = df.loc[mask]
+# --- PAGE 3: DATA SAFETY ---
+elif page == "Data Safety":
+    st.title("💾 Backup & Restore")
+    
+    st.subheader("1. Restore Data")
+    uploaded = st.file_uploader("Upload your MASTER_BIASHARA.csv", type="csv")
+    if uploaded:
+        uploaded_df = pd.read_csv(uploaded)
+        st.session_state.db = pd.concat([st.session_state.db, uploaded_df]).drop_duplicates().reset_index(drop=True)
+        st.success("✅ Data Restored and Merged!")
 
-    if not filtered_df.empty:
-        st.metric(f"Mapato ({report_type})", f"{filtered_df['Price'].sum():,.0f} TSh")
-
-        # --- RANKING (Both Spares & Services) ---
-        st.write("🏆 **Top Performers**")
-        # Combine everything for a full ranking
-        full_rank = filtered_df.groupby(['Category', 'Item', 'Model']).size().reset_index(name='Qty')
-        full_rank = full_rank.sort_values(['Category', 'Qty'], ascending=[True, False])
-        st.dataframe(full_rank, use_container_width=True)
-
-        # --- DOWNLOAD SPECIFIC REPORT ---
-        report_csv = filtered_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label=f"Download {report_type} CSV",
-            data=report_csv,
-            file_name=f"biashara_{report_type}_{today}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-    else:
-        st.warning("Hakuna data kwenye tarehe hizi.")
-
-st.divider()
-# Final Master Backup
-master_csv = st.session_state.db.to_csv(index=False).encode('utf-8')
-st.download_button("📥 DOWNLOAD MASTER BACKUP (Save Everything)", master_csv, "MASTER_BIASHARA.csv", "text/csv", use_container_width=True)
+    st.divider()
+    st.subheader("2. Save Data")
+    master_csv = st.session_state.db.to_csv(index=False).encode('utf-8')
+    st.download_button("📥 DOWNLOAD MASTER BACKUP", master_csv, "MASTER_BIASHARA.csv", "text/csv")
